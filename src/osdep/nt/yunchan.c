@@ -225,13 +225,30 @@ unsigned long unix_crlflen (STRING *s)
  * Returns: FILE structure if success, NIL if failure
  */
 
+#if _MSC_VER >= 1900
+struct _my_iobuf {
+	char *_ptr;
+	int   _cnt;
+	char *_base;
+	int   _flag;
+	int   _file;
+	int   _charbuf;
+	int   _bufsiz;
+	char *_tmpfname;
+};
+#endif
+
 FILE *create_tempfile (void)
 {
   FILE *ret = NIL;
   char *s = _tempnam (getenv ("TEMP"),"msg");
   if (s) {			/* if got temporary name... */
 				/* open file, and stash name on _tmpfname */
+#if _MSC_VER < 1900
     if (ret = fopen (s,"w+b")) ret->_tmpfname = s;
+#else
+    if (ret = fopen (s,"w+b")) ((struct _my_iobuf *)ret)->_tmpfname = s;
+#endif
     else fs_give ((void **) &s);/* flush temporary string */
   }
   return ret;
@@ -245,8 +262,13 @@ FILE *create_tempfile (void)
 int close_file (FILE *stream)
 {
   int ret;
+#if _MSC_VER < 1900
   char *s = stream->_tmpfname;
-  stream->_tmpfname = NIL;	/* just in case fclose() tries to delete it */
+  stream->_tmpfname = NIL;     /* just in case fclose() tries to delete it */
+#else
+  char *s = ((struct _my_iobuf *)stream)->_tmpfname;
+  ((struct _my_iobuf *)stream)->_tmpfname = NIL;	/* just in case fclose() tries to delete it */
+#endif
   ret = fclose (stream);	/* close the file */
   if (s) {			/* was there a _tmpfname? */
     unlink (s);			/* yup, delete it */
