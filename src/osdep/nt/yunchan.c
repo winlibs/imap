@@ -219,38 +219,46 @@ unsigned long unix_crlflen (STRING *s)
  * I would be delighted to have a better alternative.
  */
 
+/* Fixes the above regret :-) */
+static FILE *win_create_tempfile (char *name)
+{
+  HANDLE handle = INVALID_HANDLE_VALUE;
+  int descriptor = -1;
+  FILE *result = NIL;
+
+  handle = CreateFileA (name, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_DELETE,
+    NIL, CREATE_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, NIL);
+  if (handle == INVALID_HANDLE_VALUE) return NIL;
+
+  descriptor = _open_osfhandle ((intptr_t) handle, 0);
+  if (descriptor == -1) goto cleanup_handle;
+
+  result = _fdopen (descriptor, "w+b");
+  if (result == NIL) goto cleanup_descriptor;
+
+  return result;
+
+cleanup_descriptor:
+  _close (descriptor);
+  return NIL;
+
+cleanup_handle:
+  CloseHandle (handle);
+  return NIL;
+}
+
 #undef fclose			/* use the real fclose() in close_file() */
 
 /* Substitute for Microsoft's tmpfile() that uses the real temporary directory
  * Returns: FILE structure if success, NIL if failure
  */
 
-#if _MSC_VER >= 1900
-struct _my_iobuf {
-	char *_ptr;
-	int   _cnt;
-	char *_base;
-	int   _flag;
-	int   _file;
-	int   _charbuf;
-	int   _bufsiz;
-	char *_tmpfname;
-};
-#endif
-
 FILE *create_tempfile (void)
 {
   FILE *ret = NIL;
   char *s = _tempnam (getenv ("TEMP"),"msg");
-  if (s) {			/* if got temporary name... */
-				/* open file, and stash name on _tmpfname */
-#if _MSC_VER < 1900
-    if (ret = fopen (s,"w+b")) ret->_tmpfname = s;
-#else
-    if (ret = fopen (s,"w+b")) ((struct _my_iobuf *)ret)->_tmpfname = s;
-#endif
-    else fs_give ((void **) &s);/* flush temporary string */
-  }
+  if (s) ret = win_create_tempfile (s);
+  fs_give ((void **) &s);
   return ret;
 }
 
@@ -261,20 +269,7 @@ FILE *create_tempfile (void)
 
 int close_file (FILE *stream)
 {
-  int ret;
-#if _MSC_VER < 1900
-  char *s = stream->_tmpfname;
-  stream->_tmpfname = NIL;     /* just in case fclose() tries to delete it */
-#else
-  char *s = ((struct _my_iobuf *)stream)->_tmpfname;
-  ((struct _my_iobuf *)stream)->_tmpfname = NIL;	/* just in case fclose() tries to delete it */
-#endif
-  ret = fclose (stream);	/* close the file */
-  if (s) {			/* was there a _tmpfname? */
-    unlink (s);			/* yup, delete it */
-    fs_give ((void **) &s);	/* and flush the name */
-  }
-  return ret;
+  return fclose (stream);
 }
 
 /* Get password from console
